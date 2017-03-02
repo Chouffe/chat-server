@@ -2,11 +2,11 @@
 -- a library for testing.
 module Server (main) where
 
-import Data.Maybe (fromMaybe)
+import           Data.Maybe         (fromMaybe)
 import           Network
-import System.Environment (lookupEnv)
+import           System.Environment (lookupEnv)
 
-import Chat (chat)
+import           Chat               (chat)
 
 -- | Run our chat server.
 main :: IO ()
