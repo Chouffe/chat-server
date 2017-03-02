@@ -182,8 +182,7 @@ chatGreeting h = do
   hPutStrLn h logo
 
 -- | Chat server entry point
-chat :: IO ()
-chat = do
+chat :: PortID -> IO ()
+chat chatPortNumber = do
   chatServerRef <- emptyChatServerRef
-  chatPortNumber <- return 1234  -- TODO read from ENV
-  bracket (listenOn (PortNumber chatPortNumber)) sClose (handleClients chatServerRef)
+  bracket (listenOn chatPortNumber) sClose (handleClients chatServerRef)
