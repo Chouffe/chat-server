@@ -4,7 +4,8 @@ import           Control.Concurrent
 import           Control.Exception
 import           Control.Monad
 import           Data.IORef
-import           Data.List          (isPrefixOf)
+import           Data.List          (find, isPrefixOf)
+import           Data.Maybe         (fromMaybe)
 import           Network
 import           Parser             (readCommand)
 import           System.Exit        (ExitCode (ExitSuccess), exitWith)
@@ -12,30 +13,43 @@ import           System.IO
 
 import           Data
 
+-- TODO: restructure file in multiple files
+-- TODO: properly test chatServer
+
 printChatServerRef :: ChatServerRef -> Handle -> IO ()
 printChatServerRef chatServerRef h = do
   allClients <- readIORef chatServerRef
   let clientsNumber = length allClients
-      clientIds = fmap fst allClients
+      clientIds = fmap (\(cid, _, _) -> cid) allClients
   hPutStrLn h $ show clientsNumber ++ " clients are currently connected"
   hPutStrLn h $ "Client Ids: " ++ show clientIds
 
+-- TODO: display info when joining chatRoom
+chatRoomInfo :: Clients -> ChatRoom -> String
+chatRoomInfo clients chatRoom =
+  show (length cids) ++ " clients are in chatroom " ++ show chatRoom
+  where cids = filter (\(_, cr, _) -> cr == chatRoom) clients
+
 nextClientId :: Clients -> ClientId
 nextClientId []      = 0
-nextClientId clients = 1 + (maximum $ fmap fst clients)
+nextClientId clients = 1 + (maximum $ fmap (\(cid, _, _) -> cid) clients)
 
 addClient :: Handle -> Clients -> (Clients, ClientId)
-addClient h clients = ((clientId, h) : clients, clientId)
+addClient h clients = ((clientId, defaultChatRoom, h) : clients, clientId)
   where clientId = nextClientId clients
 
 removeClient :: ClientId -> Clients -> Clients
-removeClient clientId = filter (\(cid, _) -> cid /= clientId)
+removeClient clientId = filter (\(cid, _, _) -> cid /= clientId)
 
 registerClient :: ChatServerRef -> Handle -> IO ClientId
 registerClient chatServerRef h = atomicModifyIORef chatServerRef (addClient h)
 
-newChatServerRef :: IO ChatServerRef
-newChatServerRef = newIORef []
+changeChatRoom :: ChatRoom -> ClientId -> Clients -> Clients
+changeChatRoom chatRoom clientId =
+  fmap (\(cid, cr, h) ->
+    if cid == clientId
+    then (cid, chatRoom, h)
+    else (cid, cr, h))
 
 -- Infrastructure
 -- 1 thread that will register/close new clients
@@ -45,9 +59,19 @@ newChatServerRef = newIORef []
 showMessage :: ClientId -> Message -> String
 showMessage clientId message = show clientId ++ ": " ++ message
 
-broadCastMessage :: ChatServerRef -> ClientId -> Message -> IO ()
-broadCastMessage chatServerRef from msg = do
-  clientIds <- fmap fst <$> readIORef chatServerRef
+chatRoomClientIds :: ChatServerRef -> ChatRoom -> IO [ClientId]
+chatRoomClientIds chatServerRef chatRoom =
+  fmap (\(cid, _, _) -> cid) <$>
+    filter (\(_, cr, _) -> cr == chatRoom) <$>
+      readIORef chatServerRef
+
+clientIdChatRoom :: ClientId -> Clients -> ChatRoom
+clientIdChatRoom clientId =
+  (fromMaybe defaultChatRoom) . fmap (\(_, chatRoom, _) -> chatRoom) . find (\(cid, _, _) -> cid == clientId)
+
+broadCastChatRoomMessage :: ChatServerRef -> ClientId -> ChatRoom -> Message -> IO ()
+broadCastChatRoomMessage chatServerRef from chatRoom msg = do
+  clientIds <- chatRoomClientIds chatServerRef chatRoom
   sendMessageTo chatServerRef from clientIds msg
 
 handleClients :: ChatServerRef -> Socket -> IO ()
@@ -71,6 +95,10 @@ clientExit chatServerRef clientId h = do
   hClose h
   exitWith ExitSuccess
 
+joinChatRoomCommand :: ChatServerRef -> ClientId -> ChatRoom -> IO ()
+joinChatRoomCommand chatServerRef clientId chatRoom = do
+  modifyIORef chatServerRef (changeChatRoom chatRoom clientId)
+
 -- TODO: use Haskeline instead
 handleClientInput :: ChatServerRef -> ClientId -> Handle -> IO ()
 handleClientInput chatServerRef clientId h = forever $ do
@@ -80,22 +108,29 @@ handleClientInput chatServerRef clientId h = forever $ do
 
   if (isPrefixOf "/" input)
   then handleCommand chatServerRef clientId h input
-  else broadCastMessage chatServerRef clientId input
+  else do
+    chatRoom <- clientIdChatRoom clientId <$> readIORef chatServerRef
+    broadCastChatRoomMessage chatServerRef clientId chatRoom input
 
 performCommand :: ChatServerRef -> ClientId -> Handle -> ChatCommand -> IO ()
 performCommand chatServerRef from h command =
   case command of
-    Help          -> help h
-    Join chatroom -> hPutStrLn h ("Joining chatroom: " ++ show chatroom)
+    ChatRooms     -> hPutStrLn h showChatRooms
+    Help          -> hPutStrLn h "" >> help h >> hPutStrLn h ""
+    Join chatRoom -> hPutStrLn h ("joining chatroom " ++ show chatRoom) >> joinChatRoomCommand chatServerRef from chatRoom
     Msg to msg    -> sendMessageTo chatServerRef from [to] msg
     Quit          -> clientExit chatServerRef from h
     Who           -> printChatServerRef chatServerRef h
     Whoami        -> hPutStrLn h $ "Client id: " ++ show from
 
+showChatRooms :: String
+showChatRooms = "default, haskell"
+
 -- TODO: move this to a config file
 commandHelp :: [(String, String)]
 commandHelp =
-  [ ("/help",                 "displays this help menu")
+  [ ("/chatrooms",            "displays the list of all chatrooms")
+  , ("/help",                 "displays this help menu")
   , ("/join <chatroom>",      "joins the chatroom <chatroom>")
   , ("/msg <clientId> <msg>", "sends a private message <msg> to client <clientId>")
   , ("/quit",                 "exits the chat server")
@@ -113,15 +148,15 @@ help h = do
 sendMessageTo :: ChatServerRef -> ClientId -> [ClientId] -> Message -> IO ()
 sendMessageTo chatServerRef fromId toIds msg = do
   allClients <- readIORef chatServerRef
-  let toClients = filter (\(cid, _) -> cid `elem` toIds) allClients
-  forM_ toClients $ \(_, h) -> hPutStrLn h (showMessage fromId msg)
+  let toClients = filter (\(cid, _, _) -> cid `elem` toIds) allClients
+  forM_ toClients $ \(_, _, h) -> hPutStrLn h (showMessage fromId msg)
 
 handleCommand :: ChatServerRef -> ClientId -> Handle -> String -> IO ()
 handleCommand chatServerRef clientId h input =
   if (isPrefixOf "/" input)
   then
     case readCommand input of
-      Left _        -> hPutStrLn h "Cannot understand command"
+      Left err      -> hPutStrLn h (show err)
       Right command -> performCommand chatServerRef clientId h command
   else return ()
 
@@ -133,6 +168,6 @@ chatGreeting h = do
 -- | Chat server entry point
 chat :: IO ()
 chat = do
-  chatServerRef <- newChatServerRef
+  chatServerRef <- emptyChatServerRef
   chatPortNumber <- return 1234  -- TODO read from ENV
   bracket (listenOn (PortNumber chatPortNumber)) sClose (handleClients chatServerRef)

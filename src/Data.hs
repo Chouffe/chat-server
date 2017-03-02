@@ -1,5 +1,7 @@
 module Data
-  ( ClientId
+  ( emptyChatServerRef
+  , defaultChatRoom
+  , ClientId
   , Clients
   , ChatCommand(..)
   , ChatServerRef
@@ -9,12 +11,12 @@ module Data
   )
   where
 
-import Text.ParserCombinators.Parsec (ParseError)
-import Data.IORef (IORef)
-import System.IO (Handle)
+import           Data.IORef                    (IORef, newIORef)
+import           System.IO                     (Handle)
+import           Text.ParserCombinators.Parsec (ParseError)
 
 type ClientId = Integer
-type Clients = [(ClientId, Handle)]
+type Clients = [(ClientId, ChatRoom, Handle)]
 type ChatServerRef = IORef Clients
 type Message = String
 
@@ -23,14 +25,25 @@ data ChatRoom =
   | Haskell
   deriving (Eq, Show)
 
-data CommandError = CommandParseError ParseError
-  deriving (Eq, Show)
+data CommandError = CommandParseError ParseError String
+  deriving (Eq)
+
+instance Show CommandError where
+  show (CommandParseError _ input) = "cannot understand command: " ++ show input ++ " - use /help to display the help menu"
+
 
 data ChatCommand =
-    Join ChatRoom
+    ChatRooms
+  | Join ChatRoom
   | Msg ClientId Message
   | Quit
   | Who
   | Whoami
   | Help
   deriving (Eq, Show)
+
+defaultChatRoom :: ChatRoom
+defaultChatRoom = Default
+
+emptyChatServerRef :: IO ChatServerRef
+emptyChatServerRef = newIORef []

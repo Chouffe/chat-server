@@ -28,6 +28,9 @@ commandString str chatCommand = string str *> pure chatCommand
 commandQuit :: Parser ChatCommand
 commandQuit = commandString "quit" Quit
 
+commandChatRooms :: Parser ChatCommand
+commandChatRooms = commandString "chatrooms" ChatRooms
+
 commandWhoami :: Parser ChatCommand
 commandWhoami = commandString "whoami" Whoami
 
@@ -59,13 +62,15 @@ command =
   commandPrefix *>
     (     commandQuit
       <|> commandMsg
+      <|> commandChatRooms
       <|> commandJoin
       <|> commandHelp
       <|> (try commandWhoami <|> commandWho)
     )
+    <* spaces
 
 readCommand :: String -> Either CommandError ChatCommand
 readCommand input =
   case parse command "chatCommand" input of
-    Left err  -> Left $ CommandParseError err
+    Left err  -> Left $ CommandParseError err input
     Right val -> Right val
