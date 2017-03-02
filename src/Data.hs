@@ -29,7 +29,7 @@ data CommandError = CommandParseError ParseError String
   deriving (Eq)
 
 instance Show CommandError where
-  show (CommandParseError _ input) = "cannot understand command: " ++ show input ++ " - use /help to display the help menu"
+  show (CommandParseError _ input) = "server: invalid command: " ++ show input ++ " - use /help to display the help menu"
 
 
 data ChatCommand =

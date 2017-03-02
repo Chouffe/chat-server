@@ -25,8 +25,8 @@ printChatServerRef chatServerRef h = do
   hPutStrLn h $ "Client Ids: " ++ show clientIds
 
 -- TODO: display info when joining chatRoom
-chatRoomInfo :: Clients -> ChatRoom -> String
-chatRoomInfo clients chatRoom =
+chatRoomInfo :: ChatRoom -> Clients -> String
+chatRoomInfo chatRoom clients =
   show (length cids) ++ " clients are in chatroom " ++ show chatRoom
   where cids = filter (\(_, cr, _) -> cr == chatRoom) clients
 
@@ -51,6 +51,10 @@ changeChatRoom chatRoom clientId =
     then (cid, chatRoom, h)
     else (cid, cr, h))
 
+userJoinMessage :: ChatRoom -> ClientId -> Message
+userJoinMessage chatRoom clientId =
+  show clientId ++ " has joined chatroom " ++ show chatRoom
+
 -- Infrastructure
 -- 1 thread that will register/close new clients
 -- 1 thread that will listen to all clients
@@ -59,11 +63,13 @@ changeChatRoom chatRoom clientId =
 showMessage :: ClientId -> Message -> String
 showMessage clientId message = show clientId ++ ": " ++ message
 
+chatRoomClients :: ChatServerRef -> ChatRoom -> IO Clients
+chatRoomClients chatServerRef chatRoom =
+    filter (\(_, cr, _) -> cr == chatRoom) <$> readIORef chatServerRef
+
 chatRoomClientIds :: ChatServerRef -> ChatRoom -> IO [ClientId]
 chatRoomClientIds chatServerRef chatRoom =
-  fmap (\(cid, _, _) -> cid) <$>
-    filter (\(_, cr, _) -> cr == chatRoom) <$>
-      readIORef chatServerRef
+  fmap (\(cid, _, _) -> cid) <$> chatRoomClients chatServerRef chatRoom
 
 clientIdChatRoom :: ClientId -> Clients -> ChatRoom
 clientIdChatRoom clientId =
@@ -81,16 +87,25 @@ handleClients chatServerRef socket =
       chatGreeting h1
       printChatServerRef chatServerRef h1
       clientId <- registerClient chatServerRef h1
-      printChatServerRef chatServerRef stdout
+      broadCastChatRoomMessage chatServerRef clientId defaultChatRoom (userJoinMessage defaultChatRoom clientId)
+      clients <- chatRoomClients chatServerRef defaultChatRoom
+      hPutStrLn h1 $ chatRoomInfo defaultChatRoom clients
       -- TODO: clean up resources
       -- Kill Thread
       -- Better handling of resources
       _ <- forkIO $ handleClientInput chatServerRef clientId h1
       handleClients chatServerRef socket
 
+clientExitMessage :: ChatRoom -> ClientId -> Message
+clientExitMessage chatRoom clientId =
+  show clientId ++ " has left chatroom " ++ show chatRoom
+
 clientExit :: ChatServerRef -> ClientId -> Handle -> IO ()
 clientExit chatServerRef clientId h = do
+  clients <- readIORef chatServerRef
+  let chatRoom = clientIdChatRoom clientId clients
   modifyIORef chatServerRef (removeClient clientId)
+  broadCastChatRoomMessage chatServerRef clientId chatRoom (clientExitMessage chatRoom clientId)
   (hPutStrLn h "See you soon...")
   hClose h
   exitWith ExitSuccess
@@ -98,6 +113,7 @@ clientExit chatServerRef clientId h = do
 joinChatRoomCommand :: ChatServerRef -> ClientId -> ChatRoom -> IO ()
 joinChatRoomCommand chatServerRef clientId chatRoom = do
   modifyIORef chatServerRef (changeChatRoom chatRoom clientId)
+  broadCastChatRoomMessage chatServerRef clientId chatRoom (userJoinMessage defaultChatRoom clientId)
 
 -- TODO: use Haskeline instead
 handleClientInput :: ChatServerRef -> ClientId -> Handle -> IO ()
