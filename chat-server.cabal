@@ -15,10 +15,11 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Lib
-                     , Chat
+  exposed-modules:     Chat
                      , Parser
                      , Data
+                     , Command
+                     , Server
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , network >= 2.5.0.0
