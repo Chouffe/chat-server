@@ -1,21 +1,24 @@
 module Chat (chat) where
 
-import Control.Concurrent
--- import Control.Concurrent.MVar
-import Control.Exception
-import Control.Monad
--- import Data.Typeable
-import Network
-import System.IO
-import Data.IORef
-import Data.List (isPrefixOf)
-import System.Exit (exitWith, ExitCode(ExitSuccess))
-import Parser (readCommand)
+import           Control.Concurrent
+import           Control.Exception
+import           Control.Monad
+import           Data.IORef
+import           Data.List          (isPrefixOf)
+import           Network
+import           Parser             (readCommand)
+import           System.Exit        (ExitCode (ExitSuccess), exitWith)
+import           System.IO
 
-import Data
+import           Data
 
 printChatServerRef :: ChatServerRef -> Handle -> IO ()
-printChatServerRef chatServerRef h = join $ ((hPutStrLn h) . show) <$> (readIORef chatServerRef)
+printChatServerRef chatServerRef h = do
+  allClients <- readIORef chatServerRef
+  let clientsNumber = length allClients
+      clientIds = fmap fst allClients
+  hPutStrLn h $ show clientsNumber ++ " clients are currently connected"
+  hPutStrLn h $ "Client Ids: " ++ show clientIds
 
 nextClientId :: Clients -> ClientId
 nextClientId []      = 0
@@ -39,14 +42,13 @@ newChatServerRef = newIORef []
 -- 1 thread that will listen to all clients
 -- 1 thread that will push messages to clients
 
-formatMessage :: ClientId -> Message -> Message
-formatMessage clientId message = show clientId ++ ": " ++ message
+showMessage :: ClientId -> Message -> String
+showMessage clientId message = show clientId ++ ": " ++ message
 
-publishMessage :: ChatServerRef -> ClientId -> Message -> IO ()
-publishMessage chatServerRef from message = do
-  allClients <- readIORef chatServerRef
-  let targetClients = allClients  -- filter (\(clientId, _) -> (clientId /= from)) allClients
-  forM_ targetClients $ \(_, h) -> hPutStrLn h (formatMessage from message)
+broadCastMessage :: ChatServerRef -> ClientId -> Message -> IO ()
+broadCastMessage chatServerRef from msg = do
+  clientIds <- fmap fst <$> readIORef chatServerRef
+  sendMessageTo chatServerRef from clientIds msg
 
 handleClients :: ChatServerRef -> Socket -> IO ()
 handleClients chatServerRef socket =
@@ -78,17 +80,41 @@ handleClientInput chatServerRef clientId h = forever $ do
 
   if (isPrefixOf "/" input)
   then handleCommand chatServerRef clientId h input
-  else publishMessage chatServerRef clientId input
-  -- then clientExit chatServerRef clientId h >> exitWith ExitSuccess
-  -- TODO: define a broadcast function
-  -- else
+  else broadCastMessage chatServerRef clientId input
 
 performCommand :: ChatServerRef -> ClientId -> Handle -> ChatCommand -> IO ()
 performCommand chatServerRef from h command =
   case command of
-    Quit -> clientExit chatServerRef from h
-    Join chatroom -> hPutStrLn h "Joining chatroom" >> return ()
-    Msg to msg -> hPutStrLn h "Private Messaging" >> return ()
+    Help          -> help h
+    Join chatroom -> hPutStrLn h ("Joining chatroom: " ++ show chatroom)
+    Msg to msg    -> sendMessageTo chatServerRef from [to] msg
+    Quit          -> clientExit chatServerRef from h
+    Who           -> printChatServerRef chatServerRef h
+    Whoami        -> hPutStrLn h $ "Client id: " ++ show from
+
+-- TODO: move this to a config file
+commandHelp :: [(String, String)]
+commandHelp =
+  [ ("/help",                 "displays this help menu")
+  , ("/join <chatroom>",      "joins the chatroom <chatroom>")
+  , ("/msg <clientId> <msg>", "sends a private message <msg> to client <clientId>")
+  , ("/quit",                 "exits the chat server")
+  , ("/who",                  "displays who is in the current chatroom")
+  , ("/whoami",               "displays your clientid")
+  ]
+
+help :: Handle -> IO ()
+help h = do
+  hPutStrLn h "HaskChat help menu"
+  hPutStrLn h "------------------"
+  hPutStrLn h ""
+  mapM_ (\(cmd, dsc) -> hPutStrLn h (cmd ++ "\t\t" ++ dsc) ) commandHelp
+
+sendMessageTo :: ChatServerRef -> ClientId -> [ClientId] -> Message -> IO ()
+sendMessageTo chatServerRef fromId toIds msg = do
+  allClients <- readIORef chatServerRef
+  let toClients = filter (\(cid, _) -> cid `elem` toIds) allClients
+  forM_ toClients $ \(_, h) -> hPutStrLn h (showMessage fromId msg)
 
 handleCommand :: ChatServerRef -> ClientId -> Handle -> String -> IO ()
 handleCommand chatServerRef clientId h input =

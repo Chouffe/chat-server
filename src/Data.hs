@@ -30,4 +30,7 @@ data ChatCommand =
     Join ChatRoom
   | Msg ClientId Message
   | Quit
+  | Who
+  | Whoami
+  | Help
   deriving (Eq, Show)

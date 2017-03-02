@@ -13,9 +13,6 @@ clientId = read <$> many1 digit
 commandPrefix :: Parser Char
 commandPrefix = char '/'
 
-commandQuit :: Parser ChatCommand
-commandQuit = string "quit" >> return Quit
-
 commandMsg :: Parser ChatCommand
 commandMsg = do
   _ <- string "msg"
@@ -25,11 +22,26 @@ commandMsg = do
   msg <- many1 anyChar
   return $ Msg cid msg
 
+commandString :: String -> ChatCommand -> Parser ChatCommand
+commandString str chatCommand = string str *> pure chatCommand
+
+commandQuit :: Parser ChatCommand
+commandQuit = commandString "quit" Quit
+
+commandWhoami :: Parser ChatCommand
+commandWhoami = commandString "whoami" Whoami
+
+commandWho :: Parser ChatCommand
+commandWho = commandString "who" Who
+
+commandHelp :: Parser ChatCommand
+commandHelp = commandString "help" Help
+
 chatRoomHaskell :: Parser ChatRoom
-chatRoomHaskell = string "haskell" >> return Haskell
+chatRoomHaskell = string "haskell" *> return Haskell
 
 chatRoomDefault :: Parser ChatRoom
-chatRoomDefault = string "default" >> return Default
+chatRoomDefault = string "default" *> return Default
 
 chatRoom :: Parser ChatRoom
 chatRoom = chatRoomHaskell <|> chatRoomDefault
@@ -43,7 +55,14 @@ commandJoin = do
   return $ Join cr
 
 command :: Parser ChatCommand
-command = commandPrefix *> (commandQuit <|> commandMsg <|> commandJoin)
+command =
+  commandPrefix *>
+    (     commandQuit
+      <|> commandMsg
+      <|> commandJoin
+      <|> commandHelp
+      <|> (try commandWhoami <|> commandWho)
+    )
 
 readCommand :: String -> Either CommandError ChatCommand
 readCommand input =
