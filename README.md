@@ -29,6 +29,26 @@ It is based on the [Stanford Haskell Class: Functional Systems in Haskell](http:
 - `/who`                    displays who is in the current chatroom
 - `/whoami`                 displays your clientid
 
+## How to use it
+
+### Run HaskChat Server
+
+#### GHCI
+
+```
+stack ghci
+:load Server
+main
+```
+
+### CLI
+
+`stack build && stack exec -- chat-server-exe`
+
+## Connect clients
+
+`telnet localhost <haskchat-port>`
+
 ## TODO
 
 - Add thorough test suite using `QuickCheck` and `Hspec`.
