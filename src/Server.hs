@@ -7,9 +7,11 @@ import           Network
 import           System.Environment (lookupEnv)
 
 import           Chat               (chat)
+import qualified Logger as L
 
 -- | Run our chat server.
 main :: IO ()
 main = do
+  loggerSet <- L.newChatLoggerSet
   chatServerPort <- fmap read <$> lookupEnv "CHAT_SERVER_PORT"
-  chat $ PortNumber $ fromMaybe 12345 chatServerPort
+  chat loggerSet $ PortNumber $ fromMaybe 12345 chatServerPort

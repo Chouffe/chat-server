@@ -11,6 +11,8 @@ import           System.IO
 
 import           Command
 import           Data
+import qualified Logger as L
+import           System.Log.FastLogger (LoggerSet)
 
 -- TODO: restructure file in multiple files
 -- TODO: properly test chatServer
@@ -20,33 +22,33 @@ import           Data
 -- 1 thread that will listen to all clients
 -- 1 thread that will push messages to clients
 
-handleClients :: ChatServerRef -> Socket -> IO ()
-handleClients chatServerRef socket =
+handleClients :: LoggerSet -> ChatServerRef -> Socket -> IO ()
+handleClients loggerSet chatServerRef socket =
   bracket (accept socket) (\(h, _, _) ->  hClose h) $
     \(h1, _, _) -> do
       chatGreeting h1
       clientId <- registerClient chatServerRef h1
+      L.log loggerSet $ L.formatBroadcastedMessage clientId defaultChatRoom (userJoinMessage defaultChatRoom clientId)
       broadCastChatRoomMessage chatServerRef clientId defaultChatRoom (userJoinMessage defaultChatRoom clientId)
       clients <- chatRoomClients chatServerRef defaultChatRoom
       hPutStrLn h1 $ showChatRoom defaultChatRoom clients
       -- TODO: clean up resources
       -- Kill Thread
       -- Better handling of resources
-      _ <- forkIO $ handleClientInput chatServerRef clientId h1
-      handleClients chatServerRef socket
+      _ <- forkIO $ handleClientInput loggerSet chatServerRef clientId h1
+      handleClients loggerSet chatServerRef socket
 
 -- TODO: use Haskeline instead
-handleClientInput :: ChatServerRef -> ClientId -> Handle -> IO ()
-handleClientInput chatServerRef clientId h = forever $ do
+handleClientInput :: LoggerSet -> ChatServerRef -> ClientId -> Handle -> IO ()
+handleClientInput loggerSet chatServerRef clientId h = forever $ do
   input <- hGetLine h
-  -- TODO: add proper logging
-  putStrLn "Logging" >> putStrLn input
-
+  chatRoom <- clientIdChatRoom clientId <$> readIORef chatServerRef
+  L.log loggerSet $ L.formatClientInput clientId chatRoom input
   if (isPrefixOf "/" input)
-  then handleCommand chatServerRef clientId h input
+  then handleCommand loggerSet chatServerRef clientId h input
   else do
-    chatRoom <- clientIdChatRoom clientId <$> readIORef chatServerRef
     broadCastChatRoomMessage chatServerRef clientId chatRoom input
+    L.log loggerSet $ L.formatBroadcastedMessage clientId chatRoom input
 
 performCommand :: ChatServerRef -> ClientId -> Handle -> ChatCommand -> IO ()
 performCommand chatServerRef from h command =
@@ -59,13 +61,18 @@ performCommand chatServerRef from h command =
     Who           -> whoCommand chatServerRef h
     Whoami        -> whoAmiCommand h from
 
-handleCommand :: ChatServerRef -> ClientId -> Handle -> String -> IO ()
-handleCommand chatServerRef clientId h input =
+handleCommand :: LoggerSet -> ChatServerRef -> ClientId -> Handle -> String -> IO ()
+handleCommand loggerSet chatServerRef clientId h input = do
+  chatRoom <- clientIdChatRoom clientId <$> readIORef chatServerRef
   if (isPrefixOf "/" input)
   then
     case readCommand input of
-      Left err      -> hPutStrLn h (show err)
-      Right command -> performCommand chatServerRef clientId h command
+      Left err      -> do
+        hPutStrLn h (show err)
+        L.log loggerSet (L.formatCommandError clientId chatRoom err)
+      Right command -> do
+        performCommand chatServerRef clientId h command
+        L.log loggerSet (L.formatCommandPerformed clientId chatRoom command)
   else return ()
 
 chatGreeting :: Handle -> IO ()
@@ -74,7 +81,7 @@ chatGreeting h = do
   hPutStrLn h logo
 
 -- | Chat server entry point
-chat :: PortID -> IO ()
-chat chatPortNumber = do
+chat :: LoggerSet -> PortID -> IO ()
+chat loggerSet chatPortNumber = do
   chatServerRef <- emptyChatServerRef
-  bracket (listenOn chatPortNumber) sClose (handleClients chatServerRef)
+  bracket (listenOn chatPortNumber) sClose (handleClients loggerSet chatServerRef)

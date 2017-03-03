@@ -16,7 +16,7 @@ module Command
 import           Control.Monad
 import           Data.IORef
 import           Data
-import           System.Exit        (ExitCode (ExitSuccess), exitWith)
+-- import           System.Exit        (ExitCode (ExitSuccess), exitWith)
 import           System.IO
 
 -- TODO: move to Data.API?
@@ -72,7 +72,6 @@ quitCommand chatServerRef clientId h = do
   broadCastChatRoomMessage chatServerRef clientId chatRoom (clientExitMessage chatRoom clientId)
   (hPutStrLn h "See you soon...")
   hClose h
-  exitWith ExitSuccess
 
 showWhoAmi :: ClientId -> String
 showWhoAmi clientId = "Client id: " ++ show clientId
